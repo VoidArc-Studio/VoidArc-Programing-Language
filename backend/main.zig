@@ -16,7 +16,6 @@ const Token = struct {
 
 const Type = enum {
     I32, U32, F32, String, Bool, Void, Struct, Enum,
-    // Więcej...
 };
 
 const AstNode = union(enum) {
@@ -25,7 +24,6 @@ const AstNode = union(enum) {
     ExprStmt: *AstNode,
     ReturnStmt: *AstNode,
     IfStmt: struct { cond: *AstNode, then: []AstNode, els: ?[]AstNode },
-    // Więcej...
     BinaryExpr: struct { left: *AstNode, op: TokenType, right: *AstNode },
     Literal: struct { typ: Type, value: []const u8 },
     Ident: []const u8,
@@ -38,7 +36,7 @@ const Parser = struct {
     current: usize = 0,
     allocator: std.mem.Allocator,
     hadError: bool = false,
-    symbols: std.StringHashMap(Type), // Prosty symbol table
+    symbols: std.StringHashMap(Type),
 
     fn init(allocator: std.mem.Allocator, tokens: []Token) Parser {
         return .{ .tokens = tokens, .allocator = allocator, .symbols = std.StringHashMap(Type).init(allocator) };
@@ -51,127 +49,133 @@ const Parser = struct {
     fn parse(self: *Parser) ![]AstNode {
         var stmts = std.ArrayList(AstNode).init(self.allocator);
         defer stmts.deinit();
-
         while (!self.isAtEnd()) {
             try stmts.append(try self.declaration());
         }
-
         return stmts.toOwnedSlice();
     }
 
     fn declaration(self: *Parser) !AstNode {
         if (self.match(.Use)) {
-            // Parse use, ale pomijamy dla prostoty
-            self.consume(.Ident, "Oczekiwano nazwy modułu");
-            self.consume(.Colon, "Oczekiwano ':'");
-            self.consume(.Colon, "Oczekiwano '::'");
-            self.consume(.Ident, "Oczekiwano identyfikatora");
-            self.consume(.Semi, "Oczekiwano ';'");
-            return AstNode{ .ExprStmt = self.allocator.alloc(AstNode, AstNode{ .Literal = .{ .typ = .Void, .value = "" } }) orelse unreachable }; // Placeholder
+            _ = self.consume(.Ident, "Oczekiwano nazwy modułu");
+            _ = self.consume(.Colon, "Oczekiwano ':'");
+            _ = self.consume(.Colon, "Oczekiwano '::'");
+            _ = self.consume(.Ident, "Oczekiwano identyfikatora");
+            _ = self.consume(.Semi, "Oczekiwano ';'");
+            return AstNode{ .ExprStmt = try self.allocator.create(AstNode) };
         } else if (self.match(.Struct)) {
-            // Parse struct
-            self.consume(.Ident, "Oczekiwano nazwy struktury");
-            self.consume(.LBrace, "Oczekiwano '{'");
-            while (!self.check(.RBrace)) {
-                self.consume(.Ident, "Oczekiwano pola");
-                self.consume(.Colon, "Oczekiwano ':'");
+            _ = self.consume(.Ident, "Oczekiwano nazwy struktury");
+            _ = self.consume(.LBrace, "Oczekiwano '{'");
+            while (!self.check(.RBrace) and !self.isAtEnd()) {
+                _ = self.consume(.Ident, "Oczekiwano pola");
+                _ = self.consume(.Colon, "Oczekiwano ':'");
                 _ = self.parseType();
-                if (!self.check(.RBrace)) self.consume(.Comma, "Oczekiwano ','");
+                if (!self.check(.RBrace)) _ = self.consume(.Comma, "Oczekiwano ','");
             }
-            self.consume(.RBrace, "Oczekiwano '}'");
-            return AstNode{ .ExprStmt = self.allocator.alloc(AstNode, AstNode{ .Literal = .{ .typ = .Void, .value = "" } }) orelse unreachable };
+            _ = self.consume(.RBrace, "Oczekiwano '}'");
+            return AstNode{ .ExprStmt = try self.allocator.create(AstNode) };
         } else if (self.match(.Fn)) {
-            return self.fnDeclaration();
+            return try self.fnDeclaration();
         } else {
-            return self.statement();
+            return try self.statement();
         }
     }
 
     fn fnDeclaration(self: *Parser) !AstNode {
         const nameTok = self.consume(.Ident, "Oczekiwano nazwy funkcji");
-        self.consume(.LParen, "Oczekiwano '('");
+        _ = self.consume(.LParen, "Oczekiwano '('");
         var params = std.ArrayList(Param).init(self.allocator);
         defer params.deinit();
-        while (!self.check(.RParen)) {
+        while (!self.check(.RParen) and !self.isAtEnd()) {
             const paramName = self.consume(.Ident, "Oczekiwano nazwy parametru");
-            self.consume(.Colon, "Oczekiwano ':'");
+            _ = self.consume(.Colon, "Oczekiwano ':'");
             const paramType = self.parseType();
             try params.append(.{ .name = paramName.lexeme, .typ = paramType });
-            if (!self.check(.RParen)) self.consume(.Comma, "Oczekiwano ','");
+            if (!self.check(.RParen)) _ = self.consume(.Comma, "Oczekiwano ','");
         }
-        self.consume(.RParen, "Oczekiwano ')'");
+        _ = self.consume(.RParen, "Oczekiwano ')'");
         var retType = Type.Void;
         if (self.match(.Arrow)) {
             retType = self.parseType();
         }
-        self.consume(.LBrace, "Oczekiwano '{'");
+        _ = self.consume(.LBrace, "Oczekiwano '{'");
         var body = std.ArrayList(AstNode).init(self.allocator);
         defer body.deinit();
         while (!self.check(.RBrace) and !self.isAtEnd()) {
             try body.append(try self.statement());
         }
-        self.consume(.RBrace, "Oczekiwano '}'");
+        _ = self.consume(.RBrace, "Oczekiwano '}'");
         return AstNode{ .FnDecl = .{ .name = nameTok.lexeme, .params = try params.toOwnedSlice(), .retType = retType, .body = try body.toOwnedSlice() } };
     }
 
     fn statement(self: *Parser) !AstNode {
         if (self.match(.If)) {
-            const cond = try self.allocator.alloc(AstNode, try self.expression());
-            self.consume(.LBrace, "Oczekiwano '{' po if");
+            const cond = try self.allocator.create(AstNode);
+            cond.* = try self.expression();
+            _ = self.consume(.LBrace, "Oczekiwano '{' po if");
             var thenBranch = std.ArrayList(AstNode).init(self.allocator);
             defer thenBranch.deinit();
-            while (!self.check(.RBrace)) {
+            while (!self.check(.RBrace) and !self.isAtEnd()) {
                 try thenBranch.append(try self.statement());
             }
-            self.consume(.RBrace, "Oczekiwano '}'");
+            _ = self.consume(.RBrace, "Oczekiwano '}'");
             var elseBranch: ?[]AstNode = null;
             if (self.match(.Else)) {
-                self.consume(.LBrace, "Oczekiwano '{' po else");
+                _ = self.consume(.LBrace, "Oczekiwano '{' po else");
                 var elseStmts = std.ArrayList(AstNode).init(self.allocator);
-                while (!self.check(.RBrace)) {
+                while (!self.check(.RBrace) and !self.isAtEnd()) {
                     try elseStmts.append(try self.statement());
                 }
-                self.consume(.RBrace, "Oczekiwano '}'");
+                _ = self.consume(.RBrace, "Oczekiwano '}'");
                 elseBranch = try elseStmts.toOwnedSlice();
             }
             return AstNode{ .IfStmt = .{ .cond = cond, .then = try thenBranch.toOwnedSlice(), .els = elseBranch } };
         } else if (self.match(.Return)) {
             const expr = try self.expression();
-            self.consume(.Semi, "Oczekiwano ';' po return");
-            return AstNode{ .ReturnStmt = try self.allocator.alloc(AstNode, expr) };
+            _ = self.consume(.Semi, "Oczekiwano ';' po return");
+            const exprPtr = try self.allocator.create(AstNode);
+            exprPtr.* = expr;
+            return AstNode{ .ReturnStmt = exprPtr };
         } else if (self.match(.Let) or self.match(.Const)) {
             const name = self.consume(.Ident, "Oczekiwano nazwy zmiennej");
-            self.consume(.Colon, "Oczekiwano ':' dla typu");
+            _ = self.consume(.Colon, "Oczekiwano ':' dla typu");
             const typ = self.parseType();
-            var init: ?*AstNode = null;
+            var initExpr: ?*AstNode = null;
             if (self.match(.Eq)) {
                 const expr = try self.expression();
-                init = try self.allocator.alloc(AstNode, expr);
+                initExpr = try self.allocator.create(AstNode);
+                initExpr.?.* = expr;
             }
-            self.consume(.Semi, "Oczekiwano ';'");
+            _ = self.consume(.Semi, "Oczekiwano ';'");
             try self.symbols.put(name.lexeme, typ);
-            return AstNode{ .VarDecl = .{ .name = name.lexeme, .typ = typ, .init = init } };
+            return AstNode{ .VarDecl = .{ .name = name.lexeme, .typ = typ, .init = initExpr } };
         } else {
             const expr = try self.expression();
-            self.consume(.Semi, "Oczekiwano ';' po wyrażeniu");
-            return AstNode{ .ExprStmt = try self.allocator.alloc(AstNode, expr) };
+            _ = self.consume(.Semi, "Oczekiwano ';' po wyrażeniu");
+            const exprPtr = try self.allocator.create(AstNode);
+            exprPtr.* = expr;
+            return AstNode{ .ExprStmt = exprPtr };
         }
     }
 
     fn expression(self: *Parser) !AstNode {
-        return self.binary();
+        return try self.binary();
     }
 
     fn binary(self: *Parser) !AstNode {
         var expr = try self.primary();
-        while (self.match(.Plus) or self.match(.Minus) or self.match(.Star) or self.match(.Slash) or self.match(.EqEq) or self.match(.BangEq) or self.match(.Lt) or self.match(.Gt) or self.match(.LtEq) or self.match(.GtEq)) {
+        while (self.match(.Plus) or self.match(.Minus) or self.match(.Star) or self.match(.Slash) or
+            self.match(.EqEq) or self.match(.BangEq) or self.match(.Lt) or self.match(.Gt) or
+            self.match(.LtEq) or self.match(.GtEq)) {
             const op = self.previous().typ;
-            const right = try self.primary();
-            const leftPtr = try self.allocator.alloc(AstNode, expr);
-            const rightPtr = try self.allocator.alloc(AstNode, right);
-            expr = AstNode{ .BinaryExpr = .{ .left = leftPtr, .op = op, .right = rightPtr } };
-        }
-        return expr;
+        const right = try self.primary();
+        const leftPtr = try self.allocator.create(AstNode);
+        const rightPtr = try self.allocator.create(AstNode);
+        leftPtr.* = expr;
+        rightPtr.* = right;
+        expr = AstNode{ .BinaryExpr = .{ .left = leftPtr, .op = op, .right = rightPtr } };
+            }
+            return expr;
     }
 
     fn primary(self: *Parser) !AstNode {
@@ -189,55 +193,86 @@ const Parser = struct {
 
     fn parseType(self: *Parser) Type {
         const tok = self.consume(.Ident, "Oczekiwano typu");
-        return switch (tok.lexeme) {
-            "i32" => .I32,
-            "u32" => .U32,
-            "f32" => .F32,
-            "string" => .String,
-            "bool" => .Bool,
-            else => blk: {
-                self.errorAt(tok, "Nieznany typ");
-                break :blk .Void;
-            },
-        };
+        const lexeme = tok.lexeme;
+        if (std.mem.eql(u8, lexeme, "i32")) return .I32;
+        if (std.mem.eql(u8, lexeme, "u32")) return .U32;
+        if (std.mem.eql(u8, lexeme, "f32")) return .F32;
+        if (std.mem.eql(u8, lexeme, "string")) return .String;
+        if (std.mem.eql(u8, lexeme, "bool")) return .Bool;
+        self.errorAt(tok, "Nieznany typ");
+        return .Void;
     }
 
     fn typeCheck(self: *Parser, node: AstNode) void {
-        // Prosty type check
         switch (node) {
             .VarDecl => |vd| {
-                if (vd.init) |init| {
-                    const initType = self.inferType(init.*);
-                    if (initType != vd.typ) {
+                if (vd.init) |initVal| {
+                    const initType = self.inferType(initVal.*);
+                    if (initType != vd.typ and initType != .Void and vd.typ != .Void) {
                         self.hadError = true;
-                        std.debug.print("Error: Niezgodność typów w deklaracji {s}\n", .{vd.name});
+                        std.debug.print("Error: Linia {}: Niezgodność typów w deklaracji {s}: oczekiwano {s}, otrzymano {s}\n", .{
+                            self.tokens[self.current].line, vd.name, @tagName(vd.typ), @tagName(initType)
+                        });
+                        std.debug.print("Suggest: Sprawdź typ zmiennej lub inicjalizację\n", .{});
                     }
                 }
             },
             .BinaryExpr => |be| {
                 const leftType = self.inferType(be.left.*);
                 const rightType = self.inferType(be.right.*);
-                if (leftType != rightType) {
+                if (leftType != rightType and leftType != .Void and rightType != .Void) {
                     self.hadError = true;
-                    std.debug.print("Error: Niezgodność typów w operacji binarnej\n", .{});
+                    std.debug.print("Error: Linia {}: Niezgodność typów w operacji {s}: lewa {s}, prawa {s}\n", .{
+                        self.tokens[self.current].line, @tagName(be.op), @tagName(leftType), @tagName(rightType)
+                    });
+                    std.debug.print("Suggest: Upewnij się, że typy operandów są zgodne\n", .{});
                 }
             },
-            // Dodaj więcej
+            .FnDecl => |fd| {
+                for (fd.body) |stmt| {
+                    self.typeCheck(stmt);
+                }
+            },
+            .IfStmt => |ifs| {
+                self.typeCheck(ifs.cond.*);
+                for (ifs.then) |stmt| {
+                    self.typeCheck(stmt);
+                }
+                if (ifs.els) |els| {
+                    for (els) |stmt| {
+                        self.typeCheck(stmt);
+                    }
+                }
+            },
+            .ReturnStmt => |rs| {
+                self.typeCheck(rs.*);
+            },
+            .ExprStmt => |es| {
+                self.typeCheck(es.*);
+            },
             else => {},
         }
     }
 
     fn inferType(self: *Parser, node: AstNode) Type {
-        _ = self;
         switch (node) {
             .Literal => |lit| return lit.typ,
-            .Ident => |id| return self.symbols.get(id) orelse .Void,
-            // Dodaj więcej
+            .Ident => |id| return self.symbols.get(id) orelse blk: {
+                self.hadError = true;
+                std.debug.print("Error: Linia {}: Niezdefiniowana zmienna {s}\n", .{self.tokens[self.current].line, id});
+                std.debug.print("Suggest: Zadeklaruj zmienną przed użyciem\n", .{});
+                break :blk .Void;
+            },
+            .BinaryExpr => |be| {
+                const leftType = self.inferType(be.left.*);
+                const rightType = self.inferType(be.right.*);
+                if (leftType == rightType) return leftType;
+                return .Void;
+            },
             else => return .Void,
         }
     }
 
-    // Pomocnicze funkcje
     fn match(self: *Parser, typ: TokenType) bool {
         if (self.check(typ)) {
             _ = self.advance();
@@ -264,10 +299,9 @@ const Parser = struct {
     fn consume(self: *Parser, typ: TokenType, msg: []const u8) Token {
         if (self.check(typ)) {
             return self.advance();
-        } else {
-            self.errorAtCurrent(msg);
-            return .{ .typ = .Error, .lexeme = "", .line = 0, .column = 0 };
         }
+        self.errorAtCurrent(msg);
+        return .{ .typ = .Error, .lexeme = "", .line = 0, .column = 0 };
     }
 
     fn isAtEnd(self: *Parser) bool {
@@ -291,7 +325,6 @@ fn lex(source: []const u8, allocator: std.mem.Allocator) ![]Token {
     var line: usize = 1;
     var column: usize = 1;
     var i: usize = 0;
-
     while (i < source.len) {
         const c = source[i];
         switch (c) {
@@ -351,9 +384,9 @@ fn lex(source: []const u8, allocator: std.mem.Allocator) ![]Token {
             'a'...'z', 'A'...'Z', '_' => {
                 const start = i;
                 while (i < source.len and (std.ascii.isAlphanumeric(source[i]) or source[i] == '_')) i += 1;
-                const lex = source[start..i];
-                const typ = keywordType(lex) orelse .Ident;
-                try tokens.append(.{ .typ = typ, .lexeme = lex, .line = line, .column = column });
+                const lexeme = source[start..i];
+                const typ = keywordType(lexeme) orelse .Ident;
+                try tokens.append(.{ .typ = typ, .lexeme = lexeme, .line = line, .column = column });
                 i -= 1;
             },
             '0'...'9' => {
@@ -385,13 +418,24 @@ fn lex(source: []const u8, allocator: std.mem.Allocator) ![]Token {
     return tokens.toOwnedSlice();
 }
 
-fn keywordType(lex: []const u8) ?TokenType {
+fn keywordType(lexeme: []const u8) ?TokenType {
     const keywords = .{
-        "let" => .Let, "const" => .Const, "fn" => .Fn, "return" => .Return, "if" => .If, "else" => .Else,
-        "while" => .While, "for" => .For, "in" => .In, "struct" => .Struct, "enum" => .Enum, "use" => .Use, "pub" => .Pub,
+        .@"let" = .Let,
+        .@"const" = .Const,
+        .@"fn" = .Fn,
+        .@"return" = .Return,
+        .@"if" = .If,
+        .@"else" = .Else,
+        .@"while" = .While,
+        .@"for" = .For,
+        .@"in" = .In,
+        .@"struct" = .Struct,
+        .@"enum" = .Enum,
+        .@"use" = .Use,
+        .@"pub" = .Pub,
     };
     inline for (std.meta.fields(@TypeOf(keywords))) |field| {
-        if (std.mem.eql(u8, lex, field.name)) return @field(keywords, field.name);
+        if (std.mem.eql(u8, lexeme, field.name)) return @field(keywords, field.name);
     }
     return null;
 }
@@ -400,34 +444,24 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
-
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
-
     if (args.len < 3) {
         std.debug.print("Użycie: voidarc-backend check <pliki...>\n", .{});
         std.process.exit(1);
     }
-
     for (args[2..]) |file| {
         const source = try std.fs.cwd().readFileAlloc(allocator, file, 1_000_000);
         defer allocator.free(source);
-
         const tokens = try lex(source, allocator);
         defer allocator.free(tokens);
-
         var parser = Parser.init(allocator, tokens);
         defer parser.deinit();
-
         const ast = try parser.parse();
-        defer {
-            // Zwolnij AST - pomijamy dla prostoty
-        }
-
+        defer allocator.free(ast);
         for (ast) |node| {
             parser.typeCheck(node);
         }
-
         if (parser.hadError) {
             std.process.exit(1);
         }
